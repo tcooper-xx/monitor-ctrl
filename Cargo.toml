@@ -1,0 +1,42 @@
+[package]
+name = "monitor-ctrl"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "monitor-ctrl"
+path = "src/main.rs"
+
+[dependencies]
+ddc-hi = { version = "0.4", default-features = false, features = ["ddc-winapi"] }
+ddc-winapi = "0.3.0-alpha.2"
+ddc = "0.2"
+tray-icon = "0.21.2"
+auto-launch = "0.5"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+egui = "0.30"
+eframe = { version = "0.30", features = ["default_fonts"] }
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1"
+thiserror = "1"
+
+# [dependencies.windows] must come after all bare [dependencies] keys
+# because TOML absorbs subsequent bare keys into the last opened table
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Devices_Display",
+    "Win32_System_Registry",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Input_KeyboardAndMouse",
+]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

@@ -1,0 +1,15 @@
+# Rust build output
+/target/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# User-specific runtime config (contains monitor names, input codes, hotkeys)
+config.toml
+
+# Windows artifacts
+Thumbs.db
+desktop.ini
