@@ -4,14 +4,17 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let profile      = std::env::var("PROFILE").unwrap(); // "debug" or "release"
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
     let ico = build_ico();
 
-    // Write next to the compiled binary (where the app looks at runtime)
-    let runtime_assets = format!("{}/target/{}/assets", manifest_dir, profile);
+    // Write next to the compiled binary (where the app looks at runtime).
+    // OUT_DIR is typically `target/{profile}/build/monitor-ctrl-hash/out`.
+    // Moving up 3 directories places us at `target/{profile}`.
+    let target_dir = out_dir.parent().unwrap().parent().unwrap().parent().unwrap();
+    let runtime_assets = target_dir.join("assets");
     std::fs::create_dir_all(&runtime_assets).ok();
-    std::fs::write(format!("{}/icon.ico", runtime_assets), &ico)
+    std::fs::write(runtime_assets.join("icon.ico"), &ico)
         .expect("failed to write target assets/icon.ico");
 
     // Also keep a copy in the project assets folder (for packaging / reference)
