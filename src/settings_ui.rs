@@ -76,6 +76,7 @@ pub struct SettingsApp {
     captures_cycle: Vec<HotkeyCapture>,
     /// Capture state per direct hotkey (parallel to config.direct_hotkeys)
     captures_direct: Vec<HotkeyCapture>,
+    advanced_mode: bool,
 }
 
 impl SettingsApp {
@@ -106,6 +107,7 @@ impl SettingsApp {
             capture_general: HotkeyCapture::default(),
             captures_cycle: vec![HotkeyCapture::default(); cycle_len],
             captures_direct: vec![HotkeyCapture::default(); direct_len],
+            advanced_mode: false,
         }
     }
 
@@ -165,18 +167,19 @@ impl eframe::App for SettingsApp {
 
         // ── Bottom panel: Save / Cancel ────────────────────────────────────
         egui::TopBottomPanel::bottom("actions_panel")
-            .exact_height(48.0)
+            .exact_height(54.0)
             .show(ctx, |ui| {
-                ui.add_space(8.0);
+                ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     let can_save = self.hotkey_errors.is_empty()
                         && self.cycle_hotkey_errors.iter().all(|e| e.is_empty())
                         && self.direct_hotkey_errors.iter().all(|e| e.is_empty());
                     ui.add_enabled_ui(can_save, |ui| {
+                        let active_bg = ctx.style().visuals.selection.bg_fill;
                         if ui
                             .add(
                                 egui::Button::new("  Save  ")
-                                    .fill(egui::Color32::from_rgb(0, 120, 212)),
+                                    .fill(active_bg),
                             )
                             .clicked()
                         {
@@ -277,25 +280,33 @@ impl eframe::App for SettingsApp {
                     Tab::Monitors => {
                         // ── Monitors ──────────────────────────────────────
                         ui.add_space(4.0);
+                        ui.checkbox(&mut self.advanced_mode, "Advanced Mode (Show VCP Codes)");
+                        ui.add_space(8.0);
                         let metas: Vec<MonitorMeta> = self.monitors.clone();
-                        for meta in &metas {
+                        for (idx, meta) in metas.iter().enumerate() {
                             let device_id = &meta.backend_id;
 
-                            let mon = self.config.monitors
-                                .entry(device_id.clone())
-                                .or_insert_with(|| MonitorConfig {
-                                    name: meta.display_name.clone(),
-                                    ..Default::default()
-                                });
-                            if mon.name == *device_id {
-                                mon.name = meta.display_name.clone();
-                            }
+                            let header_name = {
+                                let mon = self.config.monitors
+                                    .entry(device_id.clone())
+                                    .or_insert_with(|| MonitorConfig {
+                                        name: meta.display_name.clone(),
+                                        ..Default::default()
+                                    });
+                                if mon.name == *device_id {
+                                    mon.name = meta.display_name.clone();
+                                }
+                                mon.name.clone()
+                            };
 
                             let has_unknown = meta.available_inputs.iter()
                                 .any(|(label, _)| label.starts_with("Input 0x"));
 
                             let dropdown_inputs: Vec<(String, u8)> = self.inputs_for(device_id);
 
+                            egui::CollapsingHeader::new(header_name)
+                                .default_open(idx == 0)
+                                .show(ui, |ui| {
                             ui.group(|ui| {
                                 let mon = self.config.monitors.get_mut(device_id).unwrap();
 
@@ -360,21 +371,26 @@ impl eframe::App for SettingsApp {
 
                                 const W_NAME: f32 = 130.0;
                                 const W_CODE: f32 = 64.0;
+                                let num_cols = if self.advanced_mode { 4 } else { 2 };
 
                                 egui::Grid::new(("inputs_grid", device_id.as_str()))
-                                    .num_columns(4)
+                                    .num_columns(num_cols)
                                     .spacing([8.0, 4.0])
                                     .show(ui, |ui| {
                                         ui.add_sized(
                                             [W_NAME, ui.spacing().interact_size.y],
                                             egui::Label::new(egui::RichText::new("Name").strong()),
                                         );
-                                        ui.add_sized(
-                                            [W_CODE, ui.spacing().interact_size.y],
-                                            egui::Label::new(egui::RichText::new("VCP Code").strong()),
-                                        );
+                                        if self.advanced_mode {
+                                            ui.add_sized(
+                                                [W_CODE, ui.spacing().interact_size.y],
+                                                egui::Label::new(egui::RichText::new("VCP Code").strong()),
+                                            );
+                                        }
                                         ui.label(egui::RichText::new("Show in tray").strong());
-                                        ui.label("");
+                                        if self.advanced_mode {
+                                            ui.label("");
+                                        }
                                         ui.end_row();
 
                                         for (i, edit) in edits.iter_mut().enumerate() {
@@ -389,18 +405,20 @@ impl eframe::App for SettingsApp {
                                                     .hint_text("e.g. HDMI-1"),
                                             );
 
-                                            if ui.add_sized(
-                                                [W_CODE, ui.spacing().interact_size.y],
-                                                egui::TextEdit::singleline(&mut edit.hex_str)
-                                                    .id(egui::Id::new((
-                                                        "hex",
-                                                        device_id.as_str(),
-                                                        i,
-                                                    )))
-                                                    .hint_text("0x12"),
-                                            ).changed() {
-                                                if let Ok(parsed) = parse_hex(&edit.hex_str) {
-                                                    edit.code = parsed;
+                                            if self.advanced_mode {
+                                                if ui.add_sized(
+                                                    [W_CODE, ui.spacing().interact_size.y],
+                                                    egui::TextEdit::singleline(&mut edit.hex_str)
+                                                        .id(egui::Id::new((
+                                                            "hex",
+                                                            device_id.as_str(),
+                                                            i,
+                                                        )))
+                                                        .hint_text("0x12"),
+                                                ).changed() {
+                                                    if let Ok(parsed) = parse_hex(&edit.hex_str) {
+                                                        edit.code = parsed;
+                                                    }
                                                 }
                                             }
 
@@ -413,21 +431,23 @@ impl eframe::App for SettingsApp {
                                                 }
                                             }
 
-                                            if ui.button("Reset")
-                                                .on_hover_text("Resets the input to the detected values")
-                                                .clicked()
-                                            {
-                                                let detected = meta.available_inputs.iter()
-                                                    .find(|(_, c)| *c == edit.code)
-                                                    .map(|(l, _)| l.clone())
-                                                    .or_else(|| {
-                                                        standard_inputs().into_iter()
-                                                            .find(|(_, c)| *c == edit.code)
-                                                            .map(|(l, _)| l.to_string())
-                                                    })
-                                                    .unwrap_or_else(|| format!("Input 0x{:02X}", edit.code));
-                                                edit.label = detected;
-                                                edit.hex_str = format!("0x{:02X}", edit.code);
+                                            if self.advanced_mode {
+                                                if ui.button("Reset")
+                                                    .on_hover_text("Resets the input to the detected values")
+                                                    .clicked()
+                                                {
+                                                    let detected = meta.available_inputs.iter()
+                                                        .find(|(_, c)| *c == edit.code)
+                                                        .map(|(l, _)| l.clone())
+                                                        .or_else(|| {
+                                                            standard_inputs().into_iter()
+                                                                .find(|(_, c)| *c == edit.code)
+                                                                .map(|(l, _)| l.to_string())
+                                                        })
+                                                        .unwrap_or_else(|| format!("Input 0x{:02X}", edit.code));
+                                                    edit.label = detected;
+                                                    edit.hex_str = format!("0x{:02X}", edit.code);
+                                                }
                                             }
                                             ui.end_row();
                                         }
@@ -441,7 +461,7 @@ impl eframe::App for SettingsApp {
                                     });
                                 }
                             });
-                            ui.add_space(4.0);
+                            });
                         }
                     }
 
@@ -473,34 +493,32 @@ impl eframe::App for SettingsApp {
                             );
 
                             ui.group(|ui| {
-                                egui::Grid::new(("cycle_grid", idx))
-                                    .num_columns(2)
-                                    .spacing([8.0, 6.0])
-                                    .min_col_width(90.0)
-                                    .show(ui, |ui| {
-                                        // Monitor picker
-                                        ui.label("Monitor:");
-                                        let cur_id =
-                                            self.config.cycle_hotkeys[idx].monitor_id.clone();
-                                        let cur_name = self.monitors.iter()
-                                            .find(|m| m.backend_id == cur_id)
-                                            .map(|m| m.display_name.as_str())
-                                            .unwrap_or(cur_id.as_str());
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Toggle");
+                                        let cur_id = self.config.cycle_hotkeys[idx].monitor_id.clone();
+                                        let cur_name = self.config.monitors.get(&cur_id).map(|c| c.name.as_str())
+                                            .unwrap_or_else(|| {
+                                                self.monitors.iter()
+                                                    .find(|m| m.backend_id == cur_id)
+                                                    .map(|m| m.display_name.as_str())
+                                                    .unwrap_or(cur_id.as_str())
+                                            });
                                         egui::ComboBox::from_id_salt(("cycle_mon", idx))
                                             .selected_text(cur_name)
-                                            .width(220.0)
                                             .show_ui(ui, |ui| {
                                                 for mid in &monitor_ids {
-                                                    let name = self.monitors.iter()
-                                                        .find(|m| &m.backend_id == mid)
-                                                        .map(|m| m.display_name.as_str())
-                                                        .unwrap_or(mid.as_str());
+                                                    let name = self.config.monitors.get(mid).map(|c| c.name.as_str())
+                                                        .unwrap_or_else(|| {
+                                                            self.monitors.iter()
+                                                                .find(|m| &m.backend_id == mid)
+                                                                .map(|m| m.display_name.as_str())
+                                                                .unwrap_or(mid.as_str())
+                                                        });
                                                     let selected =
-                                                        self.config.cycle_hotkeys[idx].monitor_id
-                                                            == *mid;
+                                                        self.config.cycle_hotkeys[idx].monitor_id == *mid;
                                                     if ui.selectable_label(selected, name).clicked() {
-                                                        self.config.cycle_hotkeys[idx].monitor_id =
-                                                            mid.clone();
+                                                        self.config.cycle_hotkeys[idx].monitor_id = mid.clone();
                                                         let new_inputs = self.inputs_for(mid);
                                                         self.config.cycle_hotkeys[idx].input_a =
                                                             new_inputs.get(0).map(|(_, c)| *c).unwrap_or(0x11);
@@ -509,10 +527,21 @@ impl eframe::App for SettingsApp {
                                                     }
                                                 }
                                             });
-                                        ui.end_row();
 
-                                        // Input 1 picker
-                                        ui.label("Input 1:");
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            let del_btn = egui::Button::new(
+                                                egui::RichText::new("🗑").color(egui::Color32::WHITE)
+                                            ).fill(egui::Color32::from_rgb(180, 50, 50));
+                                            if ui.add(del_btn).on_hover_text("Remove Hotkey").clicked() {
+                                                to_remove = Some(idx);
+                                            }
+                                        });
+                                    });
+                                    ui.add_space(2.0);
+
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(32.0);
+                                        ui.label("between");
                                         let cur_a = self.config.cycle_hotkeys[idx].input_a;
                                         let label_a = inputs.iter()
                                             .find(|(_, c)| *c == cur_a)
@@ -520,21 +549,15 @@ impl eframe::App for SettingsApp {
                                             .unwrap_or("?");
                                         egui::ComboBox::from_id_salt(("cycle_a", idx))
                                             .selected_text(label_a)
-                                            .width(220.0)
                                             .show_ui(ui, |ui| {
                                                 for (label, code) in &inputs {
-                                                    if ui.selectable_label(
-                                                        cur_a == *code,
-                                                        label.as_str(),
-                                                    ).clicked() {
+                                                    if ui.selectable_label(cur_a == *code, label.as_str()).clicked() {
                                                         self.config.cycle_hotkeys[idx].input_a = *code;
                                                     }
                                                 }
                                             });
-                                        ui.end_row();
 
-                                        // Input 2 picker
-                                        ui.label("Input 2:");
+                                        ui.label("and");
                                         let cur_b = self.config.cycle_hotkeys[idx].input_b;
                                         let label_b = inputs.iter()
                                             .find(|(_, c)| *c == cur_b)
@@ -542,44 +565,34 @@ impl eframe::App for SettingsApp {
                                             .unwrap_or("?");
                                         egui::ComboBox::from_id_salt(("cycle_b", idx))
                                             .selected_text(label_b)
-                                            .width(220.0)
                                             .show_ui(ui, |ui| {
                                                 for (label, code) in &inputs {
-                                                    if ui.selectable_label(
-                                                        cur_b == *code,
-                                                        label.as_str(),
-                                                    ).clicked() {
+                                                    if ui.selectable_label(cur_b == *code, label.as_str()).clicked() {
                                                         self.config.cycle_hotkeys[idx].input_b = *code;
                                                     }
                                                 }
                                             });
-                                        ui.end_row();
-
-                                        // Hotkey capture
-                                        ui.label("Hotkey:");
-                                        ui.horizontal(|ui| {
-                                            let capture = &mut self.captures_cycle[idx];
-                                            let combo =
-                                                &mut self.config.cycle_hotkeys[idx].hotkey;
-                                            let changed = hotkey_capture_ui(
-                                                ui,
-                                                capture,
-                                                combo,
-                                                egui::Id::new(("cycle_hk", idx)),
-                                            );
-                                            if changed { self.validate_hotkeys(); }
-                                            if ui.small_button("Remove").clicked() {
-                                                to_remove = Some(idx);
-                                            }
-                                        });
-                                        ui.end_row();
                                     });
+                                    ui.add_space(2.0);
+
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(32.0);
+                                        ui.label("using hotkey:");
+                                        let capture = &mut self.captures_cycle[idx];
+                                        let combo = &mut self.config.cycle_hotkeys[idx].hotkey;
+                                        let changed = hotkey_capture_ui(ui, capture, combo, egui::Id::new(("cycle_hk", idx)));
+                                        if changed { self.validate_hotkeys(); }
+                                    });
+                                });
 
                                 let ch = &self.config.cycle_hotkeys[idx];
-                                let mon_display = self.monitors.iter()
-                                    .find(|m| m.backend_id == ch.monitor_id)
-                                    .map(|m| m.display_name.as_str())
-                                    .unwrap_or(ch.monitor_id.as_str());
+                                let mon_display = self.config.monitors.get(&ch.monitor_id).map(|c| c.name.as_str())
+                                    .unwrap_or_else(|| {
+                                        self.monitors.iter()
+                                            .find(|m| m.backend_id == ch.monitor_id)
+                                            .map(|m| m.display_name.as_str())
+                                            .unwrap_or(ch.monitor_id.as_str())
+                                    });
                                 let a_label = inputs.iter()
                                     .find(|(_, c)| *c == ch.input_a)
                                     .map(|(l, _)| l.as_str())
@@ -658,27 +671,28 @@ impl eframe::App for SettingsApp {
                             );
 
                             ui.group(|ui| {
-                                egui::Grid::new(("direct_grid", idx))
-                                    .num_columns(2)
-                                    .spacing([8.0, 6.0])
-                                    .min_col_width(90.0)
-                                    .show(ui, |ui| {
-                                        // Monitor picker
-                                        ui.label("Monitor:");
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Switch");
                                         let cur_id = self.config.direct_hotkeys[idx].monitor_id.clone();
-                                        let cur_name = self.monitors.iter()
-                                            .find(|m| m.backend_id == cur_id)
-                                            .map(|m| m.display_name.as_str())
-                                            .unwrap_or(cur_id.as_str());
+                                        let cur_name = self.config.monitors.get(&cur_id).map(|c| c.name.as_str())
+                                            .unwrap_or_else(|| {
+                                                self.monitors.iter()
+                                                    .find(|m| m.backend_id == cur_id)
+                                                    .map(|m| m.display_name.as_str())
+                                                    .unwrap_or(cur_id.as_str())
+                                            });
                                         egui::ComboBox::from_id_salt(("direct_mon", idx))
                                             .selected_text(cur_name)
-                                            .width(220.0)
                                             .show_ui(ui, |ui| {
                                                 for mid in &monitor_ids {
-                                                    let name = self.monitors.iter()
-                                                        .find(|m| &m.backend_id == mid)
-                                                        .map(|m| m.display_name.as_str())
-                                                        .unwrap_or(mid.as_str());
+                                                    let name = self.config.monitors.get(mid).map(|c| c.name.as_str())
+                                                        .unwrap_or_else(|| {
+                                                            self.monitors.iter()
+                                                                .find(|m| &m.backend_id == mid)
+                                                                .map(|m| m.display_name.as_str())
+                                                                .unwrap_or(mid.as_str())
+                                                        });
                                                     let selected =
                                                         self.config.direct_hotkeys[idx].monitor_id == *mid;
                                                     if ui.selectable_label(selected, name).clicked() {
@@ -689,10 +703,21 @@ impl eframe::App for SettingsApp {
                                                     }
                                                 }
                                             });
-                                        ui.end_row();
 
-                                        // Input picker
-                                        ui.label("Switch to:");
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            let del_btn = egui::Button::new(
+                                                egui::RichText::new("🗑").color(egui::Color32::WHITE)
+                                            ).fill(egui::Color32::from_rgb(180, 50, 50));
+                                            if ui.add(del_btn).on_hover_text("Remove Hotkey").clicked() {
+                                                to_remove = Some(idx);
+                                            }
+                                        });
+                                    });
+                                    ui.add_space(2.0);
+
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(32.0);
+                                        ui.label("to input");
                                         let cur_input = self.config.direct_hotkeys[idx].input;
                                         let cur_label = inputs.iter()
                                             .find(|(_, c)| *c == cur_input)
@@ -700,44 +725,34 @@ impl eframe::App for SettingsApp {
                                             .unwrap_or("?");
                                         egui::ComboBox::from_id_salt(("direct_input", idx))
                                             .selected_text(cur_label)
-                                            .width(220.0)
                                             .show_ui(ui, |ui| {
                                                 for (label, code) in &inputs {
-                                                    if ui.selectable_label(
-                                                        cur_input == *code,
-                                                        label.as_str(),
-                                                    ).clicked() {
+                                                    if ui.selectable_label(cur_input == *code, label.as_str()).clicked() {
                                                         self.config.direct_hotkeys[idx].input = *code;
                                                     }
                                                 }
                                             });
-                                        ui.end_row();
-
-                                        // Hotkey capture
-                                        ui.label("Hotkey:");
-                                        ui.horizontal(|ui| {
-                                            let capture = &mut self.captures_direct[idx];
-                                            let combo =
-                                                &mut self.config.direct_hotkeys[idx].hotkey;
-                                            let changed = hotkey_capture_ui(
-                                                ui,
-                                                capture,
-                                                combo,
-                                                egui::Id::new(("direct_hk", idx)),
-                                            );
-                                            if changed { self.validate_hotkeys(); }
-                                            if ui.small_button("Remove").clicked() {
-                                                to_remove = Some(idx);
-                                            }
-                                        });
-                                        ui.end_row();
                                     });
+                                    ui.add_space(2.0);
+
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(32.0);
+                                        ui.label("using hotkey:");
+                                        let capture = &mut self.captures_direct[idx];
+                                        let combo = &mut self.config.direct_hotkeys[idx].hotkey;
+                                        let changed = hotkey_capture_ui(ui, capture, combo, egui::Id::new(("direct_hk", idx)));
+                                        if changed { self.validate_hotkeys(); }
+                                    });
+                                });
 
                                 let dh = &self.config.direct_hotkeys[idx];
-                                let mon_display = self.monitors.iter()
-                                    .find(|m| m.backend_id == dh.monitor_id)
-                                    .map(|m| m.display_name.as_str())
-                                    .unwrap_or(dh.monitor_id.as_str());
+                                let mon_display = self.config.monitors.get(&dh.monitor_id).map(|c| c.name.as_str())
+                                    .unwrap_or_else(|| {
+                                        self.monitors.iter()
+                                            .find(|m| m.backend_id == dh.monitor_id)
+                                            .map(|m| m.display_name.as_str())
+                                            .unwrap_or(dh.monitor_id.as_str())
+                                    });
                                 let input_label = inputs.iter()
                                     .find(|(_, c)| *c == dh.input)
                                     .map(|(l, _)| l.as_str())
@@ -804,66 +819,64 @@ fn hotkey_capture_ui(
     _id: egui::Id,
 ) -> bool {
     let mut changed = false;
-    ui.horizontal(|ui| {
-        if capture.listening {
-            ui.ctx().request_repaint();
+    if capture.listening {
+        ui.ctx().request_repaint();
 
-            let events = ui.ctx().input(|i| i.events.clone());
-            'event_loop: for event in &events {
-                if let egui::Event::Key { key, modifiers, pressed: true, .. } = event {
-                    if *key == egui::Key::Escape {
+        let events = ui.ctx().input(|i| i.events.clone());
+        'event_loop: for event in &events {
+            if let egui::Event::Key { key, modifiers, pressed: true, .. } = event {
+                if *key == egui::Key::Escape {
+                    capture.listening = false;
+                    break 'event_loop;
+                }
+                if let Some(token) = egui_key_to_token(*key) {
+                    let mod_count = [modifiers.ctrl, modifiers.alt, modifiers.shift]
+                        .iter()
+                        .filter(|&&m| m)
+                        .count();
+                    // F-keys need only one modifier; letters/digits need two
+                    // (blocks Ctrl+V, Shift+Z and other common combos)
+                    let required = if is_function_key(*key) { 1 } else { 2 };
+                    if mod_count >= required {
+                        let mut parts: Vec<&str> = Vec::new();
+                        if modifiers.ctrl  { parts.push("Ctrl"); }
+                        if modifiers.alt   { parts.push("Alt"); }
+                        if modifiers.shift { parts.push("Shift"); }
+                        parts.push(token);
+                        *combo = parts.join("+");
                         capture.listening = false;
+                        changed = true;
                         break 'event_loop;
-                    }
-                    if let Some(token) = egui_key_to_token(*key) {
-                        let mod_count = [modifiers.ctrl, modifiers.alt, modifiers.shift]
-                            .iter()
-                            .filter(|&&m| m)
-                            .count();
-                        // F-keys need only one modifier; letters/digits need two
-                        // (blocks Ctrl+V, Shift+Z and other common combos)
-                        let required = if is_function_key(*key) { 1 } else { 2 };
-                        if mod_count >= required {
-                            let mut parts: Vec<&str> = Vec::new();
-                            if modifiers.ctrl  { parts.push("Ctrl"); }
-                            if modifiers.alt   { parts.push("Alt"); }
-                            if modifiers.shift { parts.push("Shift"); }
-                            parts.push(token);
-                            *combo = parts.join("+");
-                            capture.listening = false;
-                            changed = true;
-                            break 'event_loop;
-                        }
                     }
                 }
             }
-
-            // Highlighted "waiting" button; clicking cancels listening
-            let btn = egui::Button::new("  Press a key…  ")
-                .fill(egui::Color32::from_rgb(0, 80, 160));
-            if ui
-                .add_sized([175.0, ui.spacing().interact_size.y], btn)
-                .clicked()
-            {
-                capture.listening = false;
-            }
-        } else {
-            let display = if combo.is_empty() { "Click to set…" } else { combo.as_str() };
-            if ui
-                .add_sized(
-                    [150.0, ui.spacing().interact_size.y],
-                    egui::Button::new(display),
-                )
-                .clicked()
-            {
-                capture.listening = true;
-            }
-            if !combo.is_empty() && ui.small_button("×").on_hover_text("Clear hotkey").clicked() {
-                combo.clear();
-                changed = true;
-            }
         }
-    });
+
+        // Highlighted "waiting" button; clicking cancels listening
+        let btn = egui::Button::new("  Press a key…  ")
+            .fill(egui::Color32::from_rgb(0, 80, 160));
+        if ui
+            .add_sized([175.0, ui.spacing().interact_size.y], btn)
+            .clicked()
+        {
+            capture.listening = false;
+        }
+    } else {
+        let display = if combo.is_empty() { "Click to set…" } else { combo.as_str() };
+        if ui
+            .add_sized(
+                [150.0, ui.spacing().interact_size.y],
+                egui::Button::new(display),
+            )
+            .clicked()
+        {
+            capture.listening = true;
+        }
+        if !combo.is_empty() && ui.small_button("×").on_hover_text("Clear hotkey").clicked() {
+            combo.clear();
+            changed = true;
+        }
+    }
     changed
 }
 

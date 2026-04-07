@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use tray_icon::{
     menu::{
-        CheckMenuItemBuilder, Menu, MenuEvent, MenuItemBuilder, PredefinedMenuItem,
+        CheckMenuItemBuilder, Menu, MenuEvent, MenuItemBuilder, PredefinedMenuItem, Submenu,
     },
     TrayIcon, TrayIconBuilder,
 };
@@ -41,11 +41,6 @@ impl AppTray {
 
         // Per-monitor sections
         for (idx, display) in displays.iter().enumerate() {
-            // Separator between monitors (not before the first)
-            if idx > 0 {
-                menu.append(&PredefinedMenuItem::separator()).ok();
-            }
-
             let mon_config = config.monitors.get(&display.backend_id);
             let default_name = display.model_name
                 .as_deref()
@@ -59,16 +54,12 @@ impl AppTray {
                 })
                 .unwrap_or(default_name);
 
-            // Grayed-out section header showing monitor name and current input
+            // Submenu header showing monitor name and current input
             let current_input_str = display.current_input
                 .map(|c| crate::ddc::input_label(c))
                 .unwrap_or_else(|| "Unknown".to_string());
             let header_text = format!("{mon_name} — {current_input_str}");
-            let header = MenuItemBuilder::new()
-                .text(header_text.as_str())
-                .enabled(false)
-                .build();
-            menu.append(&header).ok();
+            let submenu = Submenu::new(header_text.as_str(), true);
 
             // Input priority: config override > DDC capabilities > 4-input fallback
             let inputs: Vec<(String, u8)> = if let Some(mc) = mon_config {
@@ -110,8 +101,10 @@ impl AppTray {
                     monitor_idx: idx,
                     input_code: code,
                 });
-                menu.append(&item).ok();
+                submenu.append(&item).ok();
             }
+            
+            menu.append(&submenu).ok();
         }
 
         menu.append(&PredefinedMenuItem::separator()).ok();
